@@ -44,6 +44,14 @@ export interface VideoFile {
   base64: string;
 }
 
+export interface ProductionControls {
+  anatomyMaster: boolean;
+  anatomyCorrectionIntensity: number; // 1 to 10 scale
+  cinematicLighting: boolean;
+  textureDetail: boolean;
+  temporalStability: boolean;
+}
+
 export interface GenerateVideoParams {
   prompt: string;
   model: VeoModel;
@@ -57,4 +65,5 @@ export interface GenerateVideoParams {
   inputVideo?: VideoFile | null;
   inputVideoObject?: Video | null;
   isLooping?: boolean;
+  controls?: ProductionControls;
 }

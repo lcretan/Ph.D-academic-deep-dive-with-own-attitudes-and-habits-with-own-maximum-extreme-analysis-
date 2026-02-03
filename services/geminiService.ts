@@ -13,16 +13,50 @@ import {GenerateVideoParams, GenerationMode} from '../types';
 
 /**
  * Generates a video using the Gemini/Veo API.
- * Refactored for better speed and debugging visibility.
+ * Injects specific directives for anatomy and quality based on master controls.
  */
 export const generateVideo = async (
   params: GenerateVideoParams,
 ): Promise<{objectUrl: string; blob: Blob; uri: string; video: Video}> => {
   const startTime = performance.now();
-  console.group('Video Production Pipeline');
-  console.log('Parameters:', params);
-
+  console.group('Production Pipeline [Standalone Mode]');
+  
   const ai = new GoogleGenAI({apiKey: process.env.API_KEY});
+
+  // Build the enhanced prompt based on Master Controls
+  let enhancedPrompt = params.prompt;
+  const directives = [];
+
+  if (params.controls) {
+    if (params.controls.anatomyMaster) {
+      const intensity = params.controls.anatomyCorrectionIntensity || 5;
+      // Ultra-aggressive prompting to override bad anatomy in source images
+      const intensitySuffix = intensity > 8 
+        ? "CRITICAL: OVERRIDE SOURCE PIXELS. If the reference image has anatomical errors, ignore them and render correctly." 
+        : "";
+      
+      directives.push(`
+        ANATOMY MASTER DIRECTIVE:
+        1. Render perfectly correct human anatomy for the subject.
+        2. MANDATORY: The right hand and arm must have professional skeletal structure and exactly five fingers.
+        3. ERROR CORRECTION: Even if the provided Reference Images (A or B) contain anatomical distortions in the hands or limbs, the model MUST disregard those specific errors and synthesize correct, realistic anatomy.
+        4. Focus intensity: ${intensity}/10. ${intensitySuffix}
+      `.trim());
+    }
+    if (params.controls.cinematicLighting) {
+      directives.push("LIGHTING: 8k cinematic master-class, volumetric lighting, realistic soft bedroom shadows, professional color grading.");
+    }
+    if (params.controls.textureDetail) {
+      directives.push("TEXTURE: Ultra-realistic skin textures, fabric weave detail, sharp academic paper text, high-fidelity environment.");
+    }
+    if (params.controls.temporalStability) {
+      directives.push("STABILITY: High temporal coherence. No warping or flickering during transitions. Maintain character identity 100%.");
+    }
+  }
+
+  if (directives.length > 0) {
+    enhancedPrompt = `${enhancedPrompt}\n\n[PRODUCTION DIRECTIVES - SENSITIVE OVERRIDES]\n${directives.join("\n")}`;
+  }
 
   const config: any = {
     numberOfVideos: 1,
@@ -35,14 +69,10 @@ export const generateVideo = async (
 
   const generateVideoPayload: any = {
     model: params.model,
+    prompt: enhancedPrompt,
     config: config,
   };
 
-  if (params.prompt) {
-    generateVideoPayload.prompt = params.prompt;
-  }
-
-  // Handle specific generation modes
   if (params.mode === GenerationMode.FRAMES_TO_VIDEO) {
     if (params.startFrame) {
       generateVideoPayload.image = {
@@ -60,7 +90,6 @@ export const generateVideo = async (
     }
   } else if (params.mode === GenerationMode.REFERENCES_TO_VIDEO) {
     const referenceImagesPayload: VideoGenerationReferenceImage[] = [];
-
     if (params.referenceImages) {
       params.referenceImages.forEach((img) => {
         referenceImagesPayload.push({
@@ -69,65 +98,49 @@ export const generateVideo = async (
         });
       });
     }
-
-    if (params.styleImage) {
-      referenceImagesPayload.push({
-        image: { imageBytes: params.styleImage.base64, mimeType: params.styleImage.file.type },
-        referenceType: VideoGenerationReferenceType.STYLE,
-      });
-    }
-
     if (referenceImagesPayload.length > 0) {
       generateVideoPayload.config.referenceImages = referenceImagesPayload;
-    }
-  } else if (params.mode === GenerationMode.EXTEND_VIDEO) {
-    if (params.inputVideoObject) {
-      generateVideoPayload.video = params.inputVideoObject;
-    } else {
-      throw new Error('An input video object is required to extend a video.');
     }
   }
 
   try {
-    console.log('Submitting request to Veo engine...');
+    console.log('Production Started: ', params.mode);
     let operation = await ai.models.generateVideos(generateVideoPayload);
-    console.log('Operation ID:', operation.name);
-
-    // Optimized Polling: 5 seconds for faster turn-around on quick renders
-    let pollCount = 0;
+    
     while (!operation.done) {
-      pollCount++;
-      const timeElapsed = ((performance.now() - startTime) / 1000).toFixed(1);
-      console.log(`[${timeElapsed}s] Polling state (Attempt ${pollCount})...`);
-      
       await new Promise((resolve) => setTimeout(resolve, 5000));
       operation = await ai.operations.getVideosOperation({operation: operation});
+      console.log('Polling Engine State...');
     }
 
-    if (operation?.response) {
-      const videos = operation.response.generatedVideos;
-      if (!videos || videos.length === 0) throw new Error('Engine returned empty video array.');
+    // Safety check for operation error
+    if (operation.error) {
+      throw new Error(`Veo Engine Error: ${operation.error.message}`);
+    }
 
-      const videoObject = videos[0].video;
-      const url = decodeURIComponent(videoObject.uri);
+    // Comprehensive safety check to prevent "Cannot read properties of undefined (reading '0')"
+    if (operation?.response?.generatedVideos && operation.response.generatedVideos.length > 0) {
+      const videoObject = operation.response.generatedVideos[0].video;
+      if (!videoObject || !videoObject.uri) {
+        throw new Error('Engine finished but returned an invalid video object.');
+      }
       
-      console.log('Fetching binary data from URI...');
+      const url = decodeURIComponent(videoObject.uri);
       const res = await fetch(`${url}&key=${process.env.API_KEY}`);
-      if (!res.ok) throw new Error(`Fetch failed: ${res.status}`);
-
+      if (!res.ok) throw new Error(`Failed to fetch video binary: ${res.statusText}`);
+      
       const videoBlob = await res.blob();
       const objectUrl = URL.createObjectURL(videoBlob);
       
-      const totalTime = ((performance.now() - startTime) / 1000).toFixed(2);
-      console.log(`Production complete in ${totalTime}s`);
+      console.log('Production Complete. Duration:', ((performance.now() - startTime)/1000).toFixed(2), 's');
       console.groupEnd();
 
       return {objectUrl, blob: videoBlob, uri: url, video: videoObject};
     } else {
-      throw new Error('Operation finished but no response data found.');
+      throw new Error('Video generation completed but the response was empty. Please check your prompt or reference images.');
     }
   } catch (err) {
-    console.error('Pipeline Error:', err);
+    console.error('Production Failed:', err);
     console.groupEnd();
     throw err;
   }
