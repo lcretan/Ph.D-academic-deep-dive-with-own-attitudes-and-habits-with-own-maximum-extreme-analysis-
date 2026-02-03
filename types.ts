@@ -25,7 +25,6 @@ export enum AspectRatio {
 export enum Resolution {
   P720 = '720p',
   P1080 = '1080p',
-  P4K = '4k',
 }
 
 export enum GenerationMode {
