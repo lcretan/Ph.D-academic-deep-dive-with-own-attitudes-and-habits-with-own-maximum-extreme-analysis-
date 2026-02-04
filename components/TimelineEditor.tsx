@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
 */
 import React, { useState, useEffect, useRef } from 'react';
-import { MicIcon, PlusIcon, XMarkIcon, SparklesIcon, ArrowPathIcon } from './icons';
+import { MicIcon, PlusIcon, XMarkIcon, SparklesIcon, ArrowPathIcon, SlidersHorizontalIcon } from './icons';
 import { generateSpeech } from '../services/geminiService';
 import { AudioSegment } from '../services/audioMixer';
 
@@ -26,13 +26,19 @@ const VOICES = [
 ];
 
 const STYLES = [
-  { id: 'Natural', label: '自然' },
-  { id: 'Sleepy', label: '眠い' },
-  { id: 'Happy', label: '喜び' },
-  { id: 'Sad', label: '悲しみ' },
-  { id: 'Excited', label: '興奮' },
-  { id: 'Whisper', label: '囁き' },
-  { id: 'Terrified', label: '恐怖' },
+  { id: 'Natural', label: '自然 (Natural)' },
+  { id: 'Sleepy', label: '眠い (Sleepy)' },
+  { id: 'Happy', label: '喜び (Happy)' },
+  { id: 'Sad', label: '悲しみ (Sad)' },
+  { id: 'Excited', label: '興奮 (Excited)' },
+  { id: 'Whisper', label: '囁き (Whisper)' },
+  { id: 'Terrified', label: '恐怖 (Terrified)' },
+];
+
+const PITCHES = [
+  { id: 'Low', label: '低め (Low)' },
+  { id: 'Medium', label: '通常 (Medium)' },
+  { id: 'High', label: '高め (High)' },
 ];
 
 const TimelineEditor: React.FC<TimelineEditorProps> = ({
@@ -53,6 +59,8 @@ const TimelineEditor: React.FC<TimelineEditorProps> = ({
       text: '',
       voice: 'Kore',
       style: 'Natural',
+      speed: 1.0,
+      pitch: 'Medium',
       startTime: segments.length > 0 ? segments[segments.length - 1].startTime + (segments[segments.length - 1].duration || 2) + 0.5 : 0.5,
       duration: 2, // Estimated initial duration
       blob: null,
@@ -76,7 +84,13 @@ const TimelineEditor: React.FC<TimelineEditorProps> = ({
 
     updateSegment(id, { isGenerating: true });
     try {
-      const { audioUrl, blob } = await generateSpeech(segment.text, segment.voice, segment.style);
+      const { audioUrl, blob } = await generateSpeech(
+        segment.text, 
+        segment.voice, 
+        segment.style,
+        segment.speed,
+        segment.pitch
+      );
       
       // Calculate duration from blob size roughly or use audio element to check (more accurate)
       const tempAudio = new Audio(audioUrl);
@@ -204,13 +218,15 @@ const TimelineEditor: React.FC<TimelineEditorProps> = ({
                             />
                          </div>
                          
-                         <div className="flex-grow space-y-2">
+                         <div className="flex-grow space-y-3">
                             <textarea 
                               value={seg.text}
                               onChange={(e) => updateSegment(seg.id, { text: e.target.value })}
-                              placeholder="セリフを入力..."
+                              placeholder="セリフを入力... (強調したい単語は *強調* のように囲んでください)"
                               className="w-full bg-black border border-white/10 rounded-lg p-2 text-xs text-white focus:border-indigo-500/50 focus:outline-none min-h-[40px]"
                             />
+                            
+                            {/* Parameters Row 1 */}
                             <div className="flex flex-wrap gap-2">
                                <select 
                                  value={seg.voice}
@@ -226,14 +242,39 @@ const TimelineEditor: React.FC<TimelineEditorProps> = ({
                                >
                                   {STYLES.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
                                </select>
-                               <button 
-                                 onClick={() => generateSegmentAudio(seg.id)}
-                                 disabled={!seg.text || seg.isGenerating}
-                                 className={`px-3 py-1 rounded text-[10px] font-bold uppercase flex items-center gap-1 transition-all ${seg.blob ? 'bg-green-500/10 text-green-400 border border-green-500/20' : 'bg-indigo-600 text-white'}`}
+                               <select 
+                                 value={seg.pitch}
+                                 onChange={(e) => updateSegment(seg.id, { pitch: e.target.value })}
+                                 className="bg-black border border-white/10 text-[10px] text-gray-300 rounded px-2 py-1"
                                >
-                                  {seg.isGenerating ? <ArrowPathIcon className="w-3 h-3 animate-spin"/> : (seg.blob ? <SparklesIcon className="w-3 h-3"/> : <MicIcon className="w-3 h-3"/>)}
-                                  {seg.blob ? 'Regenerate' : 'Generate'}
-                               </button>
+                                  {PITCHES.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+                               </select>
+                            </div>
+
+                            {/* Parameters Row 2 (Speed & Actions) */}
+                            <div className="flex items-center gap-4 border-t border-white/5 pt-2">
+                                <div className="flex items-center gap-2 flex-grow">
+                                  <SlidersHorizontalIcon className="w-3 h-3 text-gray-500" />
+                                  <span className="text-[9px] font-bold text-gray-500 uppercase">Speed: {seg.speed.toFixed(1)}x</span>
+                                  <input 
+                                    type="range"
+                                    min="0.5"
+                                    max="2.0"
+                                    step="0.1"
+                                    value={seg.speed}
+                                    onChange={(e) => updateSegment(seg.id, { speed: parseFloat(e.target.value) })}
+                                    className="w-24 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                                  />
+                                </div>
+                                
+                                <button 
+                                  onClick={() => generateSegmentAudio(seg.id)}
+                                  disabled={!seg.text || seg.isGenerating}
+                                  className={`px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase flex items-center gap-2 transition-all shadow-lg ${seg.blob ? 'bg-green-500/10 text-green-400 border border-green-500/20' : 'bg-indigo-600 text-white hover:bg-indigo-500'}`}
+                                >
+                                    {seg.isGenerating ? <ArrowPathIcon className="w-3 h-3 animate-spin"/> : (seg.blob ? <SparklesIcon className="w-3 h-3"/> : <MicIcon className="w-3 h-3"/>)}
+                                    {seg.blob ? 'Regenerate' : 'Generate'}
+                                </button>
                             </div>
                          </div>
 
@@ -244,6 +285,12 @@ const TimelineEditor: React.FC<TimelineEditorProps> = ({
                    </div>
                 ))}
              </div>
+             
+             {segments.length > 0 && (
+                <div className="mt-4 p-2 bg-indigo-900/10 rounded-lg border border-indigo-500/10 text-[9px] text-indigo-300/70 text-center">
+                   Tip: 単語単位でイントネーションを変えたい場合は、クリップを分割するか、テキスト内で *強調したい単語* のようにアスタリスクで囲んでください。
+                </div>
+             )}
           </div>
        </div>
     </div>

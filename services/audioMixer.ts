@@ -9,6 +9,8 @@ export interface AudioSegment {
   text: string;
   voice: string;
   style: string;
+  speed: number; // 0.5 to 2.0
+  pitch: string; // 'Low', 'Medium', 'High'
   startTime: number; // Seconds (offset from 0)
   duration: number; // Seconds
   blob: Blob | null;
@@ -39,6 +41,13 @@ export const mixAudioSegments = async (segments: AudioSegment[], totalDuration: 
     
     const source = offlineCtx.createBufferSource();
     source.buffer = audioBuffer;
+    
+    // Note: While Web Audio API can change playbackRate, changing it here would alter the pitch
+    // unless we use complex time-stretching.
+    // For this implementation, we rely on Gemini to generate the audio at the correct speed/pitch
+    // so we play it back at rate 1.0.
+    source.playbackRate.value = 1.0; 
+
     source.connect(offlineCtx.destination);
     source.start(seg.startTime);
   }));

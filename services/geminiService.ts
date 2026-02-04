@@ -152,13 +152,32 @@ const pcmToWavBlob = (base64Pcm: string, sampleRate: number = 24000): Blob => {
 /**
  * Generates speech from text using Gemini 2.5 Flash TTS with acting style instructions.
  */
-export const generateSpeech = async (text: string, voiceName: string = 'Kore', actingStyle: string = 'Natural'): Promise<{audioUrl: string, blob: Blob}> => {
+export const generateSpeech = async (
+  text: string, 
+  voiceName: string = 'Kore', 
+  actingStyle: string = 'Natural',
+  speed: number = 1.0,
+  pitch: string = 'Medium'
+): Promise<{audioUrl: string, blob: Blob}> => {
   const ai = new GoogleGenAI({apiKey: process.env.API_KEY});
   
+  // Convert numeric speed to natural language description
+  let speedDesc = "Normal speed";
+  if (speed <= 0.7) speedDesc = "Very slow, deliberate, pausing between words";
+  else if (speed < 1.0) speedDesc = "Slightly slow, relaxed pace";
+  else if (speed > 1.3) speedDesc = "Very fast, urgent, rushing";
+  else if (speed > 1.0) speedDesc = "Fast, energetic pace";
+
   // Construct a prompt that includes acting instructions
   // Gemini 2.5 Flash TTS is multimodal and follows instructions well.
   const promptText = `
-    Acting Direction: Read the following text with a ${actingStyle} tone/emotion.
+    Acting Direction: Read the text below as a professional voice actor.
+    Emotion/Style: ${actingStyle}
+    Speaking Rate: ${speedDesc}
+    Voice Pitch: ${pitch}
+    
+    IMPORTANT: Follow the prosody instructions strictly. If words are marked with *asterisks*, emphasize them.
+    
     Text: "${text}"
   `;
 
