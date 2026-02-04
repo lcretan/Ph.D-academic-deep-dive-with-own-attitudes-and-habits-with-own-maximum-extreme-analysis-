@@ -6,7 +6,6 @@
 import {Video} from '@google/genai';
 import React, {useCallback, useEffect, useState} from 'react';
 import ApiKeyDialog from './components/ApiKeyDialog';
-import {CurvedArrowDownIcon} from './components/icons';
 import LoadingIndicator from './components/LoadingIndicator';
 import PromptForm from './components/PromptForm';
 import VideoResult from './components/VideoResult';
@@ -15,9 +14,6 @@ import {
   AppState,
   AspectRatio,
   GenerateVideoParams,
-  GenerationMode,
-  Resolution,
-  VideoFile,
 } from './types';
 
 const App: React.FC = () => {
@@ -27,14 +23,17 @@ const App: React.FC = () => {
   const [lastConfig, setLastConfig] = useState<GenerateVideoParams | null>(
     null,
   );
+  // @ts-ignore
   const [lastVideoObject, setLastVideoObject] = useState<Video | null>(null);
+  // @ts-ignore
   const [lastVideoBlob, setLastVideoBlob] = useState<Blob | null>(null);
   const [showApiKeyDialog, setShowApiKeyDialog] = useState(false);
 
-  const [initialFormValues, setInitialFormValues] =
-    useState<GenerateVideoParams | null>(null);
+  // We do not define initial values anymore to prevent potential hydration issues with complex state
+  const [initialFormValues] = useState<GenerateVideoParams | null>(null);
 
   useEffect(() => {
+    // Check if an API key is selected on mount
     const checkApiKey = async () => {
       if (window.aistudio) {
         try {
@@ -49,6 +48,18 @@ const App: React.FC = () => {
     checkApiKey();
   }, []);
 
+  // Update handler for API key dialog to trigger openSelectKey according to guidelines
+  const handleApiKeyDialogContinue = useCallback(async () => {
+    if (window.aistudio) {
+      try {
+        await window.aistudio.openSelectKey();
+      } catch (e) {
+        console.error("Failed to open key selection", e);
+      }
+    }
+    setShowApiKeyDialog(false);
+  }, []);
+
   const handleGenerate = useCallback(async (params: GenerateVideoParams) => {
     setAppState(AppState.LOADING);
     setErrorMessage(null);
@@ -60,9 +71,16 @@ const App: React.FC = () => {
       setLastVideoBlob(blob);
       setLastVideoObject(video);
       setAppState(AppState.SUCCESS);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Production failed:', error);
-      setErrorMessage(error instanceof Error ? error.message : 'Unknown production error.');
+      
+      // Handle "Requested entity was not found." by resetting key selection as per guidelines
+      if (error.message && error.message.includes("Requested entity was not found.")) {
+        setErrorMessage("プロジェクトまたはAPIキーが見つかりません。有効な課金対象のAPIキーを再選択してください。");
+        setShowApiKeyDialog(true);
+      } else {
+        setErrorMessage(error instanceof Error ? error.message : '不明な制作エラーが発生しました。');
+      }
       setAppState(AppState.ERROR);
     }
   }, []);
@@ -80,14 +98,14 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen bg-black text-gray-200 flex flex-col font-sans overflow-x-hidden">
       {showApiKeyDialog && (
-        <ApiKeyDialog onContinue={() => setShowApiKeyDialog(false)} />
+        <ApiKeyDialog onContinue={handleApiKeyDialogContinue} />
       )}
       
       <header className="py-8 flex flex-col items-center justify-center px-8 relative z-10">
         <h1 className="text-4xl sm:text-6xl font-black tracking-tighter text-center italic uppercase">
-          Production <span className="text-indigo-600">Workstation</span>
+          映像制作 <span className="text-indigo-600">ワークステーション</span>
         </h1>
-        <p className="text-[10px] font-black uppercase tracking-[0.4em] text-gray-600 mt-2">Standalone Academic Video Synthesis Engine</p>
+        <p className="text-[10px] font-black uppercase tracking-[0.4em] text-gray-600 mt-2">Veo 3.1 Pro 搭載・学術映像合成エンジン</p>
       </header>
 
       <main className="w-full max-w-5xl mx-auto flex-grow flex flex-col p-4 pb-20">
@@ -108,9 +126,9 @@ const App: React.FC = () => {
             )}
             {appState === AppState.ERROR && (
               <div className="text-center p-12 bg-red-900/10 border border-red-500/20 rounded-[3rem]">
-                <h2 className="text-2xl font-black text-red-400 uppercase tracking-tighter italic mb-4">Production Halted</h2>
+                <h2 className="text-2xl font-black text-red-400 uppercase tracking-tighter italic mb-4">制作停止</h2>
                 <p className="text-red-300/70 text-sm mb-8">{errorMessage}</p>
-                <button onClick={handleNewVideo} className="px-10 py-3 bg-red-600 hover:bg-red-500 text-white font-black uppercase tracking-widest text-[10px] rounded-full transition-all">Reset Station</button>
+                <button onClick={handleNewVideo} className="px-10 py-3 bg-red-600 hover:bg-red-500 text-white font-black uppercase tracking-widest text-[10px] rounded-full transition-all">リセット</button>
               </div>
             )}
           </div>
@@ -118,7 +136,7 @@ const App: React.FC = () => {
       </main>
 
       <footer className="fixed bottom-0 left-0 right-0 py-4 bg-black/80 backdrop-blur-xl border-t border-white/5 flex justify-center z-50">
-        <div className="text-[9px] font-black text-gray-700 uppercase tracking-[0.5em]">Veo 3.1 Pro Integrated Station</div>
+        <div className="text-[9px] font-black text-gray-700 uppercase tracking-[0.5em]">Veo 3.1 Pro Integrated Station (JP)</div>
       </footer>
     </div>
   );

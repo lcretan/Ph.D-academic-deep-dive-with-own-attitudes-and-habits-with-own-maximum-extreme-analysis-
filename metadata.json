@@ -1,6 +1,8 @@
 {
-  "name": "Original ways of top researchers' deep-dives usually with original private habits and actions ",
-  "description": "Describe any scene and get a stunning video in seconds. An effortless video generator powered by Veo.",
-  "requestFramePermissions": [],
+  "name": "トップ研究者の没頭習慣と行動分析",
+  "description": "Veo搭載の映像生成エンジン。あらゆるシーンを記述して、高品質な映像を数秒で制作します。",
+  "requestFramePermissions": [
+    "microphone"
+  ],
   "prompt": ""
 }

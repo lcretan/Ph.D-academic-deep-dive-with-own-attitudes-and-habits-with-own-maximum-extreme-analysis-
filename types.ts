@@ -47,9 +47,11 @@ export interface VideoFile {
 export interface ProductionControls {
   anatomyMaster: boolean;
   anatomyCorrectionIntensity: number; // 1 to 10 scale
+  handCorrectionIntensity: number; // New: Specific control for hands/arms
   cinematicLighting: boolean;
   textureDetail: boolean;
   temporalStability: boolean;
+  negativePrompt: string;
 }
 
 export interface GenerateVideoParams {
@@ -66,4 +68,5 @@ export interface GenerateVideoParams {
   inputVideoObject?: Video | null;
   isLooping?: boolean;
   controls?: ProductionControls;
+  seed?: number;
 }

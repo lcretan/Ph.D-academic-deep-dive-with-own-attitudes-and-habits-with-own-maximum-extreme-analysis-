@@ -23,7 +23,9 @@ import {
   Tv,
   X,
   Clapperboard,
-  Settings2
+  Settings2,
+  Mic,
+  MicOff
 } from 'lucide-react';
 
 const defaultProps = {
@@ -100,6 +102,14 @@ export const ScriptIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
 
 export const SettingsIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
   <Settings2 {...defaultProps} {...props} />
+);
+
+export const MicIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
+  <Mic {...defaultProps} {...props} />
+);
+
+export const MicOffIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
+  <MicOff {...defaultProps} {...props} />
 );
 
 // This icon had a different stroke width in the original file, so we preserve it.
