@@ -157,7 +157,8 @@ export const generateSpeech = async (
   voiceName: string = 'Kore', 
   actingStyle: string = 'Natural',
   speed: number = 1.0,
-  pitch: string = 'Medium'
+  pitch: string = 'Medium',
+  language: 'ja-JP' | 'en-US' = 'ja-JP'
 ): Promise<{audioUrl: string, blob: Blob}> => {
   const ai = new GoogleGenAI({apiKey: process.env.API_KEY});
   
@@ -168,10 +169,15 @@ export const generateSpeech = async (
   else if (speed > 1.3) speedDesc = "Very fast, urgent, rushing";
   else if (speed > 1.0) speedDesc = "Fast, energetic pace";
 
+  const langInstruction = language === 'en-US' 
+    ? "Language: English (US). Ensure native pronunciation." 
+    : "Language: Japanese. Ensure natural intonation.";
+
   // Construct a prompt that includes acting instructions
   // Gemini 2.5 Flash TTS is multimodal and follows instructions well.
   const promptText = `
     Acting Direction: Read the text below as a professional voice actor.
+    ${langInstruction}
     Emotion/Style: ${actingStyle}
     Speaking Rate: ${speedDesc}
     Voice Pitch: ${pitch}

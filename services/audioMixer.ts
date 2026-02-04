@@ -7,15 +7,18 @@
 export interface AudioSegment {
   id: string;
   text: string;
+  language: 'ja-JP' | 'en-US'; // Added language support
   voice: string;
   style: string;
   speed: number; // 0.5 to 2.0
   pitch: string; // 'Low', 'Medium', 'High'
   startTime: number; // Seconds (offset from 0)
-  duration: number; // Seconds
+  duration: number; // Current duration on timeline
+  naturalDuration?: number; // Duration of the actual audio blob
   blob: Blob | null;
   url: string | null;
   isGenerating: boolean;
+  isCustomRecording: boolean; // Flag for user recorded audio
 }
 
 /**
@@ -36,20 +39,29 @@ export const mixAudioSegments = async (segments: AudioSegment[], totalDuration: 
   
   await Promise.all(validSegments.map(async (seg) => {
     if (!seg.blob) return;
-    const arrayBuffer = await seg.blob.arrayBuffer();
-    const audioBuffer = await offlineCtx.decodeAudioData(arrayBuffer);
-    
-    const source = offlineCtx.createBufferSource();
-    source.buffer = audioBuffer;
-    
-    // Note: While Web Audio API can change playbackRate, changing it here would alter the pitch
-    // unless we use complex time-stretching.
-    // For this implementation, we rely on Gemini to generate the audio at the correct speed/pitch
-    // so we play it back at rate 1.0.
-    source.playbackRate.value = 1.0; 
+    try {
+      const arrayBuffer = await seg.blob.arrayBuffer();
+      const audioBuffer = await offlineCtx.decodeAudioData(arrayBuffer);
+      
+      const source = offlineCtx.createBufferSource();
+      source.buffer = audioBuffer;
+      
+      // Pitch/Speed correction logic
+      // If the timeline duration differs significantly from the actual blob duration,
+      // we stretch/shrink the audio to fit the visual block.
+      // Note: Changing playbackRate alters pitch in standard Web Audio API.
+      // Ideally, Gemini should re-generate at the correct speed, but this provides immediate feedback.
+      if (seg.duration > 0 && Math.abs(seg.duration - audioBuffer.duration) > 0.05) {
+         source.playbackRate.value = audioBuffer.duration / seg.duration;
+      } else {
+         source.playbackRate.value = 1.0;
+      }
 
-    source.connect(offlineCtx.destination);
-    source.start(seg.startTime);
+      source.connect(offlineCtx.destination);
+      source.start(seg.startTime);
+    } catch (e) {
+      console.error(`Failed to decode/mix segment ${seg.id}`, e);
+    }
   }));
 
   // 3. Render
