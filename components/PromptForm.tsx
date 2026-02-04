@@ -24,8 +24,12 @@ import {
   SettingsIcon,
   ArrowPathIcon,
   MicIcon,
-  MicOffIcon
+  MicOffIcon,
+  MagicWandIcon,
+  PaletteIcon,
+  FileImageIcon
 } from './icons';
+import { optimizePromptForVeo, generateStoryboardImage } from '../services/geminiService';
 
 interface PromptFormProps {
   onGenerate: (params: GenerateVideoParams) => void;
@@ -103,43 +107,92 @@ const PromptForm: React.FC<PromptFormProps> = ({ onGenerate, initialValues }) =>
   });
   const [seed, setSeed] = useState<number>(initialValues?.seed || 0);
 
+  // Tools State
+  const [isOptimizing, setIsOptimizing] = useState(false);
+  const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+  const [generatedPreview, setGeneratedPreview] = useState<{url: string, base64: string, file: File} | null>(null);
+
   // Voice Recognition State
   const [isListening, setIsListening] = useState(false);
+  const [interimTranscript, setInterimTranscript] = useState(''); // New state for interim results
+  const [voiceError, setVoiceError] = useState<string | null>(null);
   const recognitionRef = useRef<any>(null);
 
   const toggleListening = () => {
+    setVoiceError(null);
     if (isListening) {
       recognitionRef.current?.stop();
       setIsListening(false);
+      setInterimTranscript('');
       return;
     }
 
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      alert("お使いのブラウザは音声認識をサポートしていません。ChromeまたはEdgeをご利用ください。");
+      setVoiceError("お使いのブラウザは音声認識をサポートしていません。ChromeまたはEdgeをご利用ください。");
       return;
     }
 
     const recognition = new SpeechRecognition();
     recognition.lang = 'ja-JP';
-    recognition.continuous = false; // Stop after one sentence/pause for cleaner interaction
-    recognition.interimResults = false;
+    recognition.continuous = true;
+    recognition.interimResults = true; // Enable interim results to show real-time feedback
 
     recognition.onstart = () => setIsListening(true);
-    recognition.onend = () => setIsListening(false);
+    recognition.onend = () => {
+      setIsListening(false);
+      setInterimTranscript('');
+    };
+    
     recognition.onerror = (event: any) => {
       console.error("Speech recognition error", event.error);
       setIsListening(false);
+      setInterimTranscript('');
+      
+      switch (event.error) {
+        case 'not-allowed':
+        case 'permission-denied':
+          setVoiceError("マイクの使用が許可されていません。ブラウザのアドレスバーのマイクアイコンから許可してください。");
+          break;
+        case 'no-speech':
+          // Ignore no-speech errors in continuous mode usually, but inform if needed
+          break;
+        case 'network':
+          setVoiceError("ネットワークエラーが発生しました。");
+          break;
+        default:
+          setVoiceError(`音声認識エラー: ${event.error}`);
+      }
     };
+    
     recognition.onresult = (event: any) => {
-      const transcript = event.results[0][0].transcript;
-      setPrompt((prev) => {
-        // Append nicely
-        if (prev.length > 0 && !prev.endsWith(' ') && !prev.endsWith('、') && !prev.endsWith('。')) {
-          return prev + ' ' + transcript;
+      let finalTranscriptChunk = '';
+      let currentInterim = '';
+      
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+        if (event.results[i].isFinal) {
+          finalTranscriptChunk += event.results[i][0].transcript;
+        } else {
+          currentInterim += event.results[i][0].transcript;
         }
-        return prev + transcript;
-      });
+      }
+
+      // Update interim display
+      setInterimTranscript(currentInterim);
+
+      // Append final text to prompt
+      if (finalTranscriptChunk) {
+        setPrompt((prev) => {
+          const textToAdd = finalTranscriptChunk.trim();
+          if (!textToAdd) return prev;
+          
+          // Smart spacing for Japanese text
+          if (prev.length > 0 && ![' ', '、', '。', '\n'].includes(prev.slice(-1))) {
+            return prev + ' ' + textToAdd;
+          }
+          return prev + textToAdd;
+        });
+      }
     };
 
     try {
@@ -148,9 +201,47 @@ const PromptForm: React.FC<PromptFormProps> = ({ onGenerate, initialValues }) =>
     } catch (e) {
       console.error("Failed to start recognition", e);
       setIsListening(false);
+      setVoiceError("音声認識を開始できませんでした。");
     }
   };
 
+
+  const handleOptimizePrompt = async () => {
+    if (!prompt) return;
+    setIsOptimizing(true);
+    try {
+      const optimized = await optimizePromptForVeo(prompt);
+      setPrompt(optimized);
+    } catch (e) {
+      console.error("Prompt optimization failed", e);
+    } finally {
+      setIsOptimizing(false);
+    }
+  };
+
+  const handleGeneratePreview = async () => {
+    if (!prompt) return;
+    setIsGeneratingImage(true);
+    try {
+      const result = await generateStoryboardImage(prompt, aspectRatio);
+      
+      // Convert base64 to File for compatibility with existing ImageUpload component
+      const res = await fetch(`data:${result.mimeType};base64,${result.base64}`);
+      const blob = await res.blob();
+      const file = new File([blob], "generated_preview.png", { type: result.mimeType });
+      
+      setGeneratedPreview({
+        url: URL.createObjectURL(blob),
+        base64: result.base64,
+        file: file
+      });
+    } catch (e) {
+      console.error("Image generation failed", e);
+      setVoiceError("画像の生成に失敗しました。");
+    } finally {
+      setIsGeneratingImage(false);
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -198,16 +289,50 @@ const PromptForm: React.FC<PromptFormProps> = ({ onGenerate, initialValues }) =>
                 <ScriptIcon className="w-4 h-4 text-indigo-400" />
                 <label className="text-[10px] font-black uppercase tracking-[0.3em] text-gray-400">制作スクリプト (日本語対応)</label>
              </div>
-             {isListening && <span className="text-[10px] font-bold text-red-500 animate-pulse">● リスニング中...</span>}
+             {isListening && <span className="text-[10px] font-bold text-red-500 animate-pulse">● 音声認識中 (お話しください)</span>}
           </div>
           <div className="relative">
             <textarea
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               placeholder="ここに映像のシーン詳細を日本語で記述してください... （例：カフェで楽しそうに会話する二人の日本人学生、自然光、シネマティックな被写界深度）"
-              className="w-full min-h-[140px] bg-black/40 border border-white/10 rounded-3xl p-6 pb-14 text-white placeholder:text-gray-700 focus:outline-none focus:border-indigo-500/50 transition-all resize-none text-lg leading-relaxed"
+              className={`w-full min-h-[140px] border border-white/10 rounded-3xl p-6 pb-20 text-white placeholder:text-gray-700 focus:outline-none focus:border-indigo-500/50 transition-all resize-none text-lg leading-relaxed ${
+                isListening ? 'ring-2 ring-red-500/50 bg-red-900/10' : 'bg-black/40'
+              }`}
               required
             />
+            
+            {/* Interim Results Overlay/Feedback */}
+            {isListening && interimTranscript && (
+              <div className="absolute left-6 bottom-20 right-6 pointer-events-none">
+                <span className="text-gray-400 text-lg opacity-80 animate-pulse bg-black/50 px-2 rounded">
+                  {interimTranscript}
+                </span>
+              </div>
+            )}
+            
+            <div className="absolute bottom-4 left-4 flex gap-3">
+              <button
+                type="button"
+                onClick={handleOptimizePrompt}
+                disabled={!prompt || isOptimizing}
+                className="flex items-center gap-2 px-4 py-2 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 rounded-full text-[10px] font-black uppercase tracking-widest transition-all border border-indigo-500/20 disabled:opacity-50"
+              >
+                {isOptimizing ? <ArrowPathIcon className="w-4 h-4 animate-spin" /> : <MagicWandIcon className="w-4 h-4" />}
+                Veo向け最適化
+              </button>
+              
+               <button
+                type="button"
+                onClick={handleGeneratePreview}
+                disabled={!prompt || isGeneratingImage}
+                className="flex items-center gap-2 px-4 py-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 rounded-full text-[10px] font-black uppercase tracking-widest transition-all border border-amber-500/20 disabled:opacity-50"
+              >
+                {isGeneratingImage ? <ArrowPathIcon className="w-4 h-4 animate-spin" /> : <PaletteIcon className="w-4 h-4" />}
+                ストーリーボード作成
+              </button>
+            </div>
+
             <button
               type="button"
               onClick={toggleListening}
@@ -218,10 +343,59 @@ const PromptForm: React.FC<PromptFormProps> = ({ onGenerate, initialValues }) =>
               }`}
             >
               {isListening ? <MicOffIcon className="w-4 h-4" /> : <MicIcon className="w-4 h-4" />}
-              {isListening ? '停止' : '音声入力'}
+              {isListening ? '完了' : '音声入力'}
             </button>
           </div>
+          {voiceError && (
+            <div className="text-[11px] text-red-400 font-bold bg-red-900/20 p-3 rounded-xl border border-red-500/20 flex items-center gap-2 animate-in fade-in slide-in-from-top-1">
+              <XMarkIcon className="w-3 h-3" />
+              {voiceError}
+            </div>
+          )}
         </div>
+        
+        {/* Storyboard / Preview Section */}
+        {generatedPreview && (
+          <div className="animate-in fade-in zoom-in-95 duration-500 bg-black/40 border border-white/10 rounded-3xl p-6">
+            <div className="flex items-center justify-between mb-4">
+               <div className="flex items-center gap-2 text-amber-500">
+                  <PaletteIcon className="w-4 h-4" />
+                  <span className="text-[10px] font-black uppercase tracking-widest">Nano Banana Pro (Gemini 3) 生成プレビュー</span>
+               </div>
+               <button onClick={() => setGeneratedPreview(null)} className="text-gray-500 hover:text-white"><XMarkIcon className="w-4 h-4"/></button>
+            </div>
+            <div className="flex flex-col md:flex-row gap-6">
+              <img src={generatedPreview.url} alt="Storyboard" className="h-40 rounded-2xl border border-white/20 object-cover shadow-2xl" />
+              <div className="flex flex-col gap-3 justify-center">
+                 <p className="text-xs text-gray-400 leading-relaxed max-w-sm mb-2">
+                   この画像を動画生成のキーフレームとして使用できます。「画像から生成」モードに自動的に切り替わります。
+                 </p>
+                 <button
+                   type="button"
+                   onClick={() => {
+                     setMode(GenerationMode.FRAMES_TO_VIDEO);
+                     setStartFrame({ file: generatedPreview.file, base64: generatedPreview.base64 });
+                   }}
+                   className="flex items-center gap-3 px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-[10px] font-bold text-white transition-all text-left"
+                 >
+                   <ArrowRightIcon className="w-3 h-3 text-indigo-400" />
+                   開始フレームに設定
+                 </button>
+                 <button
+                   type="button"
+                   onClick={() => {
+                     setMode(GenerationMode.FRAMES_TO_VIDEO);
+                     setEndFrame({ file: generatedPreview.file, base64: generatedPreview.base64 });
+                   }}
+                   className="flex items-center gap-3 px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-[10px] font-bold text-white transition-all text-left"
+                 >
+                   <ArrowRightIcon className="w-3 h-3 text-pink-400" />
+                   終了フレームに設定
+                 </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {mode === GenerationMode.FRAMES_TO_VIDEO && (
           <div className="flex gap-4 overflow-x-auto pb-2 scrollbar-hide">

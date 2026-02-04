@@ -1,4 +1,3 @@
-
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -105,7 +104,7 @@ const App: React.FC = () => {
         <h1 className="text-4xl sm:text-6xl font-black tracking-tighter text-center italic uppercase">
           映像制作 <span className="text-indigo-600">ワークステーション</span>
         </h1>
-        <p className="text-[10px] font-black uppercase tracking-[0.4em] text-gray-600 mt-2">Veo 3.1 Pro 搭載・学術映像合成エンジン</p>
+        <p className="text-[10px] font-black uppercase tracking-[0.4em] text-gray-600 mt-2">Veo 3.1 Pro 搭載・プロフェッショナル映像合成エンジン</p>
       </header>
 
       <main className="w-full max-w-5xl mx-auto flex-grow flex flex-col p-4 pb-20">

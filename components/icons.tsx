@@ -25,7 +25,9 @@ import {
   Clapperboard,
   Settings2,
   Mic,
-  MicOff
+  MicOff,
+  Wand2,
+  Palette
 } from 'lucide-react';
 
 const defaultProps = {
@@ -110,6 +112,14 @@ export const MicIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
 
 export const MicOffIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
   <MicOff {...defaultProps} {...props} />
+);
+
+export const MagicWandIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
+  <Wand2 {...defaultProps} {...props} />
+);
+
+export const PaletteIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
+  <Palette {...defaultProps} {...props} />
 );
 
 // This icon had a different stroke width in the original file, so we preserve it.
