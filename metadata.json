@@ -1,5 +1,5 @@
 {
-  "name": "Veo 映像制作スタジオ",
+  "name": "Veo-Shop_v1",
   "description": "Veo搭載のプロフェッショナル映像生成ワークステーション。あらゆるシーンを記述して、高品質な映像を数秒で制作します。",
   "requestFramePermissions": [
     "microphone"

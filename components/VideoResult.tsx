@@ -5,10 +5,13 @@
 */
 import React, {useState, useRef, useMemo, useEffect} from 'react';
 import {AspectRatio} from '../types';
-import {ArrowPathIcon, DownloadIcon, SparklesIcon, FileImageIcon, PlusIcon, MicIcon} from './icons';
+import {ArrowPathIcon, DownloadIcon, SparklesIcon, FileImageIcon, PlusIcon, MicIcon, FilmIcon, ClapperboardIcon} from './icons';
 // @ts-ignore
 import gifshot from 'gifshot';
 import { generateSpeech } from '../services/geminiService';
+import { muxVideoAndAudio } from '../services/mediaService';
+import TimelineEditor from './TimelineEditor';
+import { AudioSegment, mixAudioSegments } from '../services/audioMixer';
 
 interface VideoResultProps {
   videoUrl: string;
@@ -17,30 +20,31 @@ interface VideoResultProps {
   onExtend: () => void;
   canExtend: boolean;
   aspectRatio: AspectRatio;
+  isImported?: boolean;
 }
 
-const VOICES = [
-  { name: 'Kore', label: 'Kore (女性・落ち着き)', gender: 'Female' },
-  { name: 'Puck', label: 'Puck (女性・少し低め)', gender: 'Female' },
-  { name: 'Charon', label: 'Charon (男性・深み)', gender: 'Male' },
-  { name: 'Fenrir', label: 'Fenrir (男性・威厳)', gender: 'Male' },
-  { name: 'Zephyr', label: 'Zephyr (女性・明るめ)', gender: 'Female' },
-];
-
 const VideoResult: React.FC<VideoResultProps> = ({
-  videoUrl, onRetry, onNewVideo, onExtend, canExtend, aspectRatio
+  videoUrl, onRetry, onNewVideo, onExtend, canExtend, aspectRatio, isImported = false
 }) => {
   const isPortrait = aspectRatio === AspectRatio.PORTRAIT;
   const [isExporting, setIsExporting] = useState(false);
   const [duration, setDuration] = useState(0);
+  const [videoDimensions, setVideoDimensions] = useState({ width: 1280, height: 720 });
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
 
-  // Audio/Dubbing State
-  const [speechText, setSpeechText] = useState("徹夜したんでしょ。どうしたの？入っていいよ。");
-  const [selectedVoice, setSelectedVoice] = useState('Kore');
-  const [isGeneratingAudio, setIsGeneratingAudio] = useState(false);
-  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  // Timeline State
+  const [segments, setSegments] = useState<AudioSegment[]>([]);
+  const [masterAudioUrl, setMasterAudioUrl] = useState<string | null>(null);
+  
+  // Muxing State
+  const [isMuxing, setIsMuxing] = useState(false);
+
+  // Initialize Video Metadata
+  const handleLoadedMetadata = (e: React.SyntheticEvent<HTMLVideoElement>) => {
+    setDuration(e.currentTarget.duration);
+    setVideoDimensions({ width: e.currentTarget.videoWidth, height: e.currentTarget.videoHeight });
+  };
 
   const handleGifExport = async (divisor: number) => {
     if (!videoUrl) return;
@@ -89,159 +93,155 @@ const VideoResult: React.FC<VideoResultProps> = ({
     }
   };
 
-  const handleGenerateAudio = async () => {
-    if (!speechText) return;
-    setIsGeneratingAudio(true);
+  const handlePreviewSync = async () => {
+    if (segments.length === 0) return;
+    
+    // Check if any segment needs generation
+    const needsGeneration = segments.some(s => s.text && !s.blob && !s.isGenerating);
+    if (needsGeneration) {
+      alert("音声を生成していないクリップがあります。各クリップの「Generate」ボタンを押してください。");
+      return;
+    }
+
     try {
-      const result = await generateSpeech(speechText, selectedVoice);
-      setAudioUrl(result.audioUrl);
+      // Use the duration from the video, or max duration of segments
+      const mixBlob = await mixAudioSegments(segments, duration || 5);
+      const url = URL.createObjectURL(mixBlob);
+      setMasterAudioUrl(url);
+      
+      // Auto play
+      if (videoRef.current && audioRef.current) {
+        videoRef.current.currentTime = 0;
+        audioRef.current.src = url;
+        // Wait for audio to load slightly
+        setTimeout(() => {
+             videoRef.current?.play();
+             audioRef.current?.play();
+        }, 100);
+      }
     } catch (e) {
-      console.error("Audio generation failed", e);
-      alert("音声の生成に失敗しました。");
-    } finally {
-      setIsGeneratingAudio(false);
+      console.error("Mixing failed", e);
+      alert("プレビューの作成に失敗しました");
     }
   };
 
-  const toggleCombinedPlayback = () => {
-    if (!videoRef.current) return;
+  const handleMuxAndDownload = async () => {
+    if (!videoUrl) return;
     
-    if (videoRef.current.paused) {
-      videoRef.current.currentTime = 0;
-      videoRef.current.play();
-      if (audioUrl && audioRef.current) {
-        audioRef.current.currentTime = 0;
-        audioRef.current.play();
-      }
-    } else {
-      videoRef.current.pause();
-      if (audioUrl && audioRef.current) {
-        audioRef.current.pause();
-      }
+    // If we haven't mixed yet or segments changed, mix now
+    let finalAudioUrl = masterAudioUrl;
+    if (!finalAudioUrl && segments.length > 0) {
+        try {
+            const mixBlob = await mixAudioSegments(segments, duration || 5);
+            finalAudioUrl = URL.createObjectURL(mixBlob);
+        } catch (e) {
+            console.error(e);
+            alert("音声合成に失敗しました");
+            return;
+        }
+    }
+
+    if (!finalAudioUrl) {
+        alert("音声トラックが空です。");
+        return;
+    }
+
+    setIsMuxing(true);
+    try {
+      const muxedUrl = await muxVideoAndAudio(videoUrl, finalAudioUrl);
+      const a = document.createElement('a');
+      a.href = muxedUrl;
+      a.download = `veo-timeline-export-${Date.now()}.mp4`;
+      a.click();
+    } catch (e) {
+      console.error("Muxing failed", e);
+      alert("動画の書き出しに失敗しました。");
+    } finally {
+      setIsMuxing(false);
     }
   };
 
   return (
-    <div className="w-full flex flex-col items-center gap-8 py-12 px-6 bg-[#0a0a0b] rounded-[3rem] border border-white/5 shadow-3xl animate-in zoom-in-95 duration-500 max-w-6xl mx-auto">
-      <div className="text-center space-y-2">
-        <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-indigo-500/10 border border-indigo-500/20 rounded-full text-[10px] font-black uppercase tracking-[0.2em] text-indigo-400">
-          <SparklesIcon className="w-3.5 h-3.5" />
-          生成完了 (Success)
-        </div>
-        <h2 className="text-4xl font-black text-white tracking-tighter uppercase italic">The Final Cut</h2>
-        <p className="text-[10px] text-gray-600 font-bold uppercase tracking-[0.3em]">Cinematic Render • Veo 3.1 Pro</p>
-      </div>
-
-      <div className="flex flex-col lg:flex-row gap-8 w-full items-start justify-center">
-        {/* Video Player Section */}
-        <div className={`relative group ${isPortrait ? 'max-w-xs' : 'w-full max-w-2xl'} shrink-0 bg-black rounded-3xl overflow-hidden shadow-[0_0_80px_-20px_rgba(79,70,229,0.4)] border border-white/10`}>
-          <video
-            ref={videoRef}
-            src={videoUrl}
-            controls
-            className="w-full h-full object-contain"
-            onLoadedMetadata={e => setDuration(e.currentTarget.duration)}
-            onPlay={() => {
-              if (audioRef.current && audioUrl) {
-                // simple sync attempt when user presses play on video native controls
-                if (Math.abs(videoRef.current!.currentTime - audioRef.current.currentTime) > 0.5) {
-                   audioRef.current.currentTime = videoRef.current!.currentTime;
-                }
-                audioRef.current.play();
-              }
-            }}
-            onPause={() => audioRef.current?.pause()}
-            onSeeked={() => {
-              if (audioRef.current) audioRef.current.currentTime = videoRef.current!.currentTime;
-            }}
-          />
-          <div className="absolute inset-0 border-[16px] border-black/10 pointer-events-none" />
-        </div>
-
-        {/* Dubbing Studio Section */}
-        <div className="w-full max-w-md bg-white/5 rounded-3xl p-6 border border-white/10 flex flex-col gap-4">
-           <div className="flex items-center gap-2 mb-2">
-             <MicIcon className="w-5 h-5 text-indigo-400" />
-             <h3 className="text-sm font-black uppercase tracking-widest text-white">アフレコスタジオ (Dubbing)</h3>
-           </div>
-           
-           <div className="space-y-3">
-              <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">セリフ (Script)</label>
-              <textarea
-                value={speechText}
-                onChange={(e) => setSpeechText(e.target.value)}
-                className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-sm text-white focus:outline-none focus:border-indigo-500/50 min-h-[80px]"
-                placeholder="ここにセリフを入力..."
+    <div className="w-full flex flex-col items-center gap-8 py-8 px-6 bg-[#050505] rounded-[2rem] border border-white/5 shadow-3xl animate-in zoom-in-95 duration-500 max-w-[1400px] mx-auto">
+      
+      {/* Top Section: Video Preview + Info */}
+      <div className="flex flex-col xl:flex-row gap-8 w-full items-start">
+         
+         {/* Left: Player */}
+         <div className="flex-1 w-full flex flex-col items-center gap-4">
+            <div className={`relative group w-full bg-black rounded-3xl overflow-hidden shadow-2xl border border-white/10 aspect-video max-h-[60vh] flex items-center justify-center`}>
+              <video
+                ref={videoRef}
+                src={videoUrl}
+                controls={false} // Custom controls via Timeline? Or keep native for now
+                className={`max-w-full max-h-full object-contain ${isPortrait ? 'h-full w-auto' : 'w-full h-auto'}`}
+                onLoadedMetadata={handleLoadedMetadata}
+                onPlay={() => audioRef.current?.play()}
+                onPause={() => audioRef.current?.pause()}
+                onSeeked={() => {
+                  if (audioRef.current && videoRef.current) {
+                    audioRef.current.currentTime = videoRef.current.currentTime;
+                  }
+                }}
               />
-           </div>
+              {/* Hidden Master Audio Player */}
+              <audio ref={audioRef} className="hidden" />
+              
+              {/* Overlay Controls (Play/Pause could go here) */}
+              <div className="absolute inset-0 pointer-events-none flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                 <button 
+                   onClick={() => videoRef.current?.paused ? videoRef.current.play() : videoRef.current?.pause()} 
+                   className="bg-white/10 backdrop-blur-md p-6 rounded-full pointer-events-auto hover:bg-white/20 transition-all transform hover:scale-110"
+                 >
+                    {videoRef.current?.paused ? <div className="w-0 h-0 border-t-[10px] border-t-transparent border-l-[20px] border-l-white border-b-[10px] border-b-transparent ml-1" /> : <div className="flex gap-2"><div className="w-2 h-6 bg-white"/><div className="w-2 h-6 bg-white"/></div>}
+                 </button>
+              </div>
+            </div>
 
-           <div className="space-y-3">
-              <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">声質 (Voice Actor)</label>
-              <select
-                value={selectedVoice}
-                onChange={(e) => setSelectedVoice(e.target.value)}
-                className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-sm text-white focus:outline-none"
-              >
-                {VOICES.map(v => (
-                  <option key={v.name} value={v.name}>{v.label}</option>
-                ))}
-              </select>
-           </div>
+            {/* Quick Actions Bar */}
+            <div className="flex gap-4 w-full justify-center">
+                <button onClick={onRetry} className="px-6 py-3 bg-white/5 hover:bg-white/10 text-gray-300 text-xs font-bold uppercase rounded-xl transition-all border border-white/10">
+                   RE-ROLL VIDEO
+                </button>
+                <button onClick={handleMuxAndDownload} disabled={isMuxing} className="px-8 py-3 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black uppercase rounded-xl transition-all shadow-lg shadow-indigo-600/20 flex items-center gap-2">
+                   {isMuxing ? <ArrowPathIcon className="w-4 h-4 animate-spin"/> : <DownloadIcon className="w-4 h-4" />}
+                   EXPORT FINAL CUT (MP4)
+                </button>
+                <button onClick={onNewVideo} className="px-6 py-3 bg-white/5 hover:bg-white/10 text-gray-300 text-xs font-bold uppercase rounded-xl transition-all border border-white/10">
+                   NEW PROJECT
+                </button>
+            </div>
+         </div>
 
-           <button
-             onClick={handleGenerateAudio}
-             disabled={isGeneratingAudio || !speechText}
-             className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-700 text-white font-bold text-xs uppercase tracking-widest rounded-xl transition-all flex items-center justify-center gap-2"
-           >
-             {isGeneratingAudio ? <ArrowPathIcon className="w-4 h-4 animate-spin" /> : <MicIcon className="w-4 h-4" />}
-             音声生成 (Generate Audio)
-           </button>
-
-           {audioUrl && (
-             <div className="mt-4 p-4 bg-black/30 rounded-xl border border-indigo-500/30 animate-in slide-in-from-top-2">
-                <audio ref={audioRef} src={audioUrl} controls className="w-full h-8 mb-4" />
-                <div className="flex gap-2">
-                  <button onClick={toggleCombinedPlayback} className="flex-1 py-2 bg-white/10 hover:bg-white/20 text-white text-[10px] font-bold uppercase tracking-widest rounded-lg transition-all">
-                    ▶ 同時再生プレビュー
-                  </button>
-                  <a href={audioUrl} download="dubbing.wav" className="px-3 py-2 bg-white/5 hover:bg-white/10 text-indigo-300 text-[10px] font-bold uppercase rounded-lg border border-white/10 flex items-center justify-center">
-                    <DownloadIcon className="w-4 h-4" />
-                  </a>
-                </div>
+         {/* Right (or Bottom on mobile): Timeline Editor */}
+         <div className="w-full xl:w-[40%] flex flex-col gap-4">
+             <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-black text-white uppercase tracking-widest flex items-center gap-2">
+                   <ClapperboardIcon className="w-4 h-4 text-indigo-400" />
+                   Timeline Editor
+                </h3>
+                <span className="text-[10px] font-mono text-gray-500">NON-LINEAR AUDIO SEQ</span>
              </div>
-           )}
-        </div>
-      </div>
+             
+             <TimelineEditor 
+                duration={duration} 
+                videoWidth={videoDimensions.width}
+                videoHeight={videoDimensions.height}
+                segments={segments}
+                onSegmentsChange={setSegments}
+                onPreviewRequest={handlePreviewSync}
+             />
 
-      <div className="flex flex-wrap justify-center gap-4 w-full border-t border-white/5 pt-8">
-        <button onClick={onRetry} className="group flex items-center gap-3 px-8 py-4 bg-white/5 hover:bg-white/10 text-white font-black text-[11px] uppercase tracking-widest rounded-2xl border border-white/10 transition-all active:scale-95">
-          <ArrowPathIcon className="w-4 h-4 text-gray-400 group-hover:text-white transition-colors" />
-          再レンダリング (RETRY)
-        </button>
+             <div className="p-4 bg-white/5 rounded-xl border border-white/5 mt-4">
+                <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Editor Tips</h4>
+                <ul className="text-[10px] text-gray-500 space-y-1 list-disc list-inside">
+                   <li>「Add Clip」でセリフを追加し、スライダーで開始位置（タイミング）を調整します。</li>
+                   <li>「Generate」で各クリップの音声を生成後、「Preview Sync」で映像と同期確認できます。</li>
+                   <li>イントネーションを変えるには「演技 (Style)」を変更して再生成してください。</li>
+                </ul>
+             </div>
+         </div>
 
-        <a href={videoUrl} download="veo-production.mp4" className="flex items-center gap-3 px-10 py-4 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-[11px] uppercase tracking-widest rounded-2xl shadow-xl shadow-indigo-600/20 transition-all active:scale-95">
-          <DownloadIcon className="w-4 h-4" />
-          MP4ダウンロード
-        </a>
-
-        <div className="relative group">
-          <button disabled={isExporting} className="flex items-center gap-3 px-8 py-4 bg-amber-600/90 hover:bg-amber-600 text-white font-black text-[11px] uppercase tracking-widest rounded-2xl shadow-xl shadow-amber-900/10 transition-all disabled:opacity-50">
-            {isExporting ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <FileImageIcon className="w-4 h-4" />}
-            GIF変換出力
-          </button>
-          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-4 w-40 bg-[#161617] border border-white/10 rounded-2xl shadow-3xl opacity-0 translate-y-2 pointer-events-none group-hover:opacity-100 group-hover:translate-y-0 group-hover:pointer-events-auto transition-all duration-200 z-50 overflow-hidden">
-             {[ {l: '等倍速', s: 1}, {l: '2倍速', s: 2}, {l: '4倍速', s: 4} ].map(o => (
-               <button key={o.l} onClick={() => handleGifExport(o.s)} className="w-full text-left px-5 py-4 text-[10px] font-black uppercase tracking-widest text-gray-500 hover:text-white hover:bg-white/5 transition-all">
-                 {o.l}
-               </button>
-             ))}
-          </div>
-        </div>
-
-        <button onClick={onNewVideo} className="flex items-center gap-3 px-8 py-4 bg-white/5 hover:bg-white/10 text-white font-black text-[11px] uppercase tracking-widest rounded-2xl border border-white/10 transition-all">
-          <PlusIcon className="w-4 h-4" />
-          新規作成 (NEW)
-        </button>
       </div>
     </div>
   );

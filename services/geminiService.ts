@@ -150,14 +150,21 @@ const pcmToWavBlob = (base64Pcm: string, sampleRate: number = 24000): Blob => {
 };
 
 /**
- * Generates speech from text using Gemini 2.5 Flash TTS
+ * Generates speech from text using Gemini 2.5 Flash TTS with acting style instructions.
  */
-export const generateSpeech = async (text: string, voiceName: string = 'Kore'): Promise<{audioUrl: string, blob: Blob}> => {
+export const generateSpeech = async (text: string, voiceName: string = 'Kore', actingStyle: string = 'Natural'): Promise<{audioUrl: string, blob: Blob}> => {
   const ai = new GoogleGenAI({apiKey: process.env.API_KEY});
   
+  // Construct a prompt that includes acting instructions
+  // Gemini 2.5 Flash TTS is multimodal and follows instructions well.
+  const promptText = `
+    Acting Direction: Read the following text with a ${actingStyle} tone/emotion.
+    Text: "${text}"
+  `;
+
   const response = await ai.models.generateContent({
     model: "gemini-2.5-flash-preview-tts",
-    contents: [{ parts: [{ text: text }] }],
+    contents: [{ parts: [{ text: promptText }] }],
     config: {
       responseModalities: [Modality.AUDIO],
       speechConfig: {

@@ -27,7 +27,8 @@ import {
   Mic,
   MicOff,
   Wand2,
-  Palette
+  Palette,
+  Upload
 } from 'lucide-react';
 
 const defaultProps = {
@@ -80,7 +81,7 @@ export const FramesModeIcon: React.FC<React.SVGProps<SVGSVGElement>> = (
 
 export const ReferencesModeIcon: React.FC<React.SVGProps<SVGSVGElement>> = (
   props,
-) => <Film {...defaultProps} {...props} />;
+) => <Film {...defaultProps} {...props} />
 
 export const TvIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
   <Tv {...defaultProps} {...props} />
@@ -102,6 +103,11 @@ export const ScriptIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
   <Clapperboard {...defaultProps} {...props} />
 );
 
+// Alias ScriptIcon as ClapperboardIcon for clarity in VideoResult
+export const ClapperboardIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
+  <Clapperboard {...defaultProps} {...props} />
+);
+
 export const SettingsIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
   <Settings2 {...defaultProps} {...props} />
 );
@@ -120,6 +126,10 @@ export const MagicWandIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) =>
 
 export const PaletteIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
   <Palette {...defaultProps} {...props} />
+);
+
+export const UploadIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
+  <Upload {...defaultProps} {...props} />
 );
 
 // This icon had a different stroke width in the original file, so we preserve it.
