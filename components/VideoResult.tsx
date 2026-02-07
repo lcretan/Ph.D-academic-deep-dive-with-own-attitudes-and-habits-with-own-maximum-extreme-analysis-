@@ -21,10 +21,12 @@ interface VideoResultProps {
   canExtend: boolean;
   aspectRatio: AspectRatio;
   isImported?: boolean;
+  onSaveProject: (segments: AudioSegment[]) => void;
+  initialSegments?: AudioSegment[];
 }
 
 const VideoResult: React.FC<VideoResultProps> = ({
-  videoUrl, onRetry, onNewVideo, onExtend, canExtend, aspectRatio, isImported = false
+  videoUrl, onRetry, onNewVideo, onExtend, canExtend, aspectRatio, isImported = false, onSaveProject, initialSegments
 }) => {
   const isPortrait = aspectRatio === AspectRatio.PORTRAIT;
   const [isExporting, setIsExporting] = useState(false);
@@ -39,6 +41,13 @@ const VideoResult: React.FC<VideoResultProps> = ({
   
   // Muxing State
   const [isMuxing, setIsMuxing] = useState(false);
+
+  // Load initial segments if restored from project
+  useEffect(() => {
+    if (initialSegments) {
+        setSegments(initialSegments);
+    }
+  }, [initialSegments]);
 
   // Initialize Video Metadata
   const handleLoadedMetadata = (e: React.SyntheticEvent<HTMLVideoElement>) => {
@@ -106,6 +115,10 @@ const VideoResult: React.FC<VideoResultProps> = ({
     try {
       // Use the duration from the video, or max duration of segments
       const mixBlob = await mixAudioSegments(segments, duration || 5);
+      
+      // Cleanup previous master
+      if (masterAudioUrl) URL.revokeObjectURL(masterAudioUrl);
+
       const url = URL.createObjectURL(mixBlob);
       setMasterAudioUrl(url);
       
@@ -142,7 +155,12 @@ const VideoResult: React.FC<VideoResultProps> = ({
     }
 
     if (!finalAudioUrl) {
-        alert("音声トラックが空です。");
+        // Fallback: If no audio, just download video
+        alert("音声トラックがありません。映像のみダウンロードします。");
+        const a = document.createElement('a');
+        a.href = videoUrl;
+        a.download = `veo-video-only-${Date.now()}.mp4`;
+        a.click();
         return;
     }
 
@@ -155,7 +173,7 @@ const VideoResult: React.FC<VideoResultProps> = ({
       a.click();
     } catch (e) {
       console.error("Muxing failed", e);
-      alert("動画の書き出しに失敗しました。");
+      alert("動画の書き出しに失敗しました。各トラックを個別にダウンロードしてください。");
     } finally {
       setIsMuxing(false);
     }
@@ -199,13 +217,27 @@ const VideoResult: React.FC<VideoResultProps> = ({
             </div>
 
             {/* Quick Actions Bar */}
-            <div className="flex gap-4 w-full justify-center">
+            <div className="flex flex-wrap gap-4 w-full justify-center">
                 <button onClick={onRetry} className="px-6 py-3 bg-white/5 hover:bg-white/10 text-gray-300 text-xs font-bold uppercase rounded-xl transition-all border border-white/10">
                    RE-ROLL VIDEO
                 </button>
+                
+                 {/* Video Only Download (New Feature) */}
+                 <a 
+                   href={videoUrl} 
+                   download={`veo-video-raw-${Date.now()}.mp4`}
+                   className="px-6 py-3 bg-blue-500/10 hover:bg-blue-500/20 text-blue-300 text-xs font-bold uppercase rounded-xl transition-all border border-blue-500/20 flex items-center gap-2"
+                 >
+                   <DownloadIcon className="w-4 h-4" />
+                   VIDEO ONLY (MP4)
+                </a>
+
+                 <button onClick={() => onSaveProject(segments)} className="px-6 py-3 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 text-xs font-bold uppercase rounded-xl transition-all border border-indigo-500/20">
+                   SAVE PROJECT
+                </button>
                 <button onClick={handleMuxAndDownload} disabled={isMuxing} className="px-8 py-3 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black uppercase rounded-xl transition-all shadow-lg shadow-indigo-600/20 flex items-center gap-2">
                    {isMuxing ? <ArrowPathIcon className="w-4 h-4 animate-spin"/> : <DownloadIcon className="w-4 h-4" />}
-                   EXPORT FINAL CUT (MP4)
+                   EXPORT FINAL (MUXED)
                 </button>
                 <button onClick={onNewVideo} className="px-6 py-3 bg-white/5 hover:bg-white/10 text-gray-300 text-xs font-bold uppercase rounded-xl transition-all border border-white/10">
                    NEW PROJECT
@@ -235,9 +267,10 @@ const VideoResult: React.FC<VideoResultProps> = ({
              <div className="p-4 bg-white/5 rounded-xl border border-white/5 mt-4">
                 <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Editor Tips</h4>
                 <ul className="text-[10px] text-gray-500 space-y-1 list-disc list-inside">
-                   <li>「Add Clip」でセリフを追加し、スライダーで開始位置（タイミング）を調整します。</li>
+                   <li>「Download Icon」で個別の音声クリップを保存できます。</li>
+                   <li>「Video Only」で映像だけを救出できます。</li>
                    <li>「Generate」で各クリップの音声を生成後、「Preview Sync」で映像と同期確認できます。</li>
-                   <li>イントネーションを変えるには「演技 (Style)」を変更して再生成してください。</li>
+                   <li>Save Project を押すと、現在の動画と音声トラックがIndexedDBに保存され、後でLoad可能です。</li>
                 </ul>
              </div>
          </div>

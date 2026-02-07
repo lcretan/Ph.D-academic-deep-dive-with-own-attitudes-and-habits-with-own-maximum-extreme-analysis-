@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
 */
 import React, { useState, useEffect, useRef } from 'react';
-import { MicIcon, PlusIcon, XMarkIcon, SparklesIcon, ArrowPathIcon, SlidersHorizontalIcon, DownloadIcon } from './icons';
+import { MicIcon, PlusIcon, XMarkIcon, SparklesIcon, ArrowPathIcon, DownloadIcon } from './icons';
 import { generateSpeech } from '../services/geminiService';
 import { AudioSegment } from '../services/audioMixer';
 
@@ -36,9 +36,9 @@ const STYLES = [
 ];
 
 const PITCHES = [
-  { id: 'Low', label: '低め (Low)' },
-  { id: 'Medium', label: '通常 (Medium)' },
-  { id: 'High', label: '高め (High)' },
+  { id: 'Low', label: '低 (Low)' },
+  { id: 'Medium', label: '中 (Med)' },
+  { id: 'High', label: '高 (High)' },
 ];
 
 const TimelineEditor: React.FC<TimelineEditorProps> = ({
@@ -60,6 +60,15 @@ const TimelineEditor: React.FC<TimelineEditorProps> = ({
     }
   }, []);
 
+  // Cleanup effect: Revoke object URLs when component unmounts to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      segments.forEach(seg => {
+        if (seg.url) URL.revokeObjectURL(seg.url);
+      });
+    };
+  }, []);
+
   // Global Mouse Events for Dragging
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -79,8 +88,6 @@ const TimelineEditor: React.FC<TimelineEditorProps> = ({
         // Calculate recommended speed based on original audio length if available
         const segment = segments.find(s => s.id === dragState.id);
         if (segment && segment.naturalDuration && !segment.isCustomRecording) {
-            // If we stretch the clip (longer duration), speed should decrease (slower)
-            // If we shrink the clip (shorter duration), speed should increase (faster)
             // speed = natural / target
             const suggestedSpeed = Math.min(2.0, Math.max(0.5, segment.naturalDuration / newDuration));
             updateSegment(dragState.id, { duration: newDuration, speed: suggestedSpeed });
@@ -124,6 +131,10 @@ const TimelineEditor: React.FC<TimelineEditorProps> = ({
   };
 
   const removeSegment = (id: string) => {
+    const seg = segments.find(s => s.id === id);
+    if (seg && seg.url) {
+      URL.revokeObjectURL(seg.url); // Immediate cleanup
+    }
     onSegmentsChange(segments.filter(s => s.id !== id));
   };
 
@@ -135,9 +146,17 @@ const TimelineEditor: React.FC<TimelineEditorProps> = ({
     const segment = segments.find(s => s.id === id);
     if (!segment || !segment.text) return;
 
+    // Set generating state
     updateSegment(id, { isGenerating: true, isCustomRecording: false });
+
     try {
-      const { audioUrl, blob } = await generateSpeech(
+      // 1. Cleanup old URL if exists to prevent memory leak
+      if (segment.url) {
+        URL.revokeObjectURL(segment.url);
+      }
+
+      // 2. Call API (Updated: returns 'duration' too)
+      const { audioUrl, blob, duration } = await generateSpeech(
         segment.text, 
         segment.voice, 
         segment.style,
@@ -146,26 +165,21 @@ const TimelineEditor: React.FC<TimelineEditorProps> = ({
         segment.language
       );
       
-      const tempAudio = new Audio(audioUrl);
-      tempAudio.onloadedmetadata = () => {
-         // Reset duration to natural duration adjusted by speed if speed was part of generation
-         // Note: The generateSpeech function uses the speed prompt, so the resulting audio *is* at that speed.
-         // So natural duration at 1.0 would be (duration * speed).
-         const generatedDuration = tempAudio.duration;
-         const naturalDuration = generatedDuration * segment.speed; 
-         
-         updateSegment(id, { 
-            blob, 
-            url: audioUrl, 
-            isGenerating: false,
-            duration: generatedDuration,
-            naturalDuration: naturalDuration 
-          });
-      };
+      // 3. Update State using calculated duration directly
+      // This bypasses the need for "new Audio().onloadedmetadata" which causes hangs/timeouts.
+      updateSegment(id, { 
+        blob, 
+        url: audioUrl, 
+        isGenerating: false,
+        duration: duration, 
+        naturalDuration: duration 
+      });
+
     } catch (e) {
-      console.error(e);
+      console.error("Generation failed:", e);
+      // IMPORTANT: Ensure isGenerating is turned off even on error
       updateSegment(id, { isGenerating: false });
-      alert("音声生成に失敗しました");
+      alert("音声生成に失敗しました。再試行してください。");
     }
   };
 
@@ -181,10 +195,14 @@ const TimelineEditor: React.FC<TimelineEditorProps> = ({
       };
 
       mediaRecorder.onstop = () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' }); // or 'audio/webm' depending on browser
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
         const audioUrl = URL.createObjectURL(audioBlob);
-        const tempAudio = new Audio(audioUrl);
         
+        // Cleanup old
+        const segment = segments.find(s => s.id === id);
+        if (segment?.url) URL.revokeObjectURL(segment.url);
+
+        const tempAudio = new Audio(audioUrl);
         tempAudio.onloadedmetadata = () => {
             updateSegment(id, {
                 blob: audioBlob,
@@ -192,11 +210,10 @@ const TimelineEditor: React.FC<TimelineEditorProps> = ({
                 duration: tempAudio.duration,
                 naturalDuration: tempAudio.duration,
                 isCustomRecording: true,
-                speed: 1.0 // Reset speed for custom recording
+                speed: 1.0
             });
         };
         
-        // Stop all tracks
         stream.getTracks().forEach(track => track.stop());
       };
 
@@ -226,7 +243,9 @@ const TimelineEditor: React.FC<TimelineEditorProps> = ({
     const audio = new Audio(segment.url);
     previewAudioRef.current = audio;
     setPlayingId(id);
-    audio.play();
+    audio.play()
+        .then(() => {})
+        .catch(e => console.error("Play failed", e));
     audio.onended = () => setPlayingId(null);
   };
 
@@ -425,7 +444,16 @@ const TimelineEditor: React.FC<TimelineEditorProps> = ({
                                         {STYLES.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
                                      </select>
                                      
-                                     {/* Speed Control with Direct Input */}
+                                     {/* PITCH CONTROL RESTORED */}
+                                     <select 
+                                       value={seg.pitch}
+                                       onChange={(e) => updateSegment(seg.id, { pitch: e.target.value })}
+                                       className="bg-black border border-white/10 text-[10px] text-gray-300 rounded px-2 py-1 max-w-[60px]"
+                                     >
+                                        {PITCHES.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+                                     </select>
+
+                                     {/* Speed Control */}
                                      <div className="flex items-center bg-black border border-white/10 rounded px-2 py-1">
                                         <span className="text-[9px] text-gray-500 mr-1">SPD:</span>
                                         <input 
@@ -455,6 +483,18 @@ const TimelineEditor: React.FC<TimelineEditorProps> = ({
                                         <span className="text-[10px]">▶</span>
                                       )}
                                    </button>
+                                   
+                                   {/* DOWNLOAD CLIP BUTTON */}
+                                   {seg.url && (
+                                     <a
+                                       href={seg.url}
+                                       download={`veo-audio-clip-${seg.id.slice(0,5)}.wav`}
+                                       className="p-1.5 rounded-md bg-white/5 hover:bg-white/10 text-gray-300 hover:text-indigo-400"
+                                       title="Download Audio Clip"
+                                     >
+                                       <DownloadIcon className="w-3.5 h-3.5" />
+                                     </a>
+                                   )}
 
                                    {/* Record Custom */}
                                    <button
